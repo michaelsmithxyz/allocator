@@ -75,7 +75,6 @@ static void coalesce_free_list() {
         }
         current = current->next;
     }
-    pthread_mutex_unlock(&mutex);
 }
 
 // Insert a free block onto the list and coalesce blocks
@@ -103,10 +102,12 @@ static void insert_free_block(free_block_header *block) {
         } 
     }
     coalesce_free_list();
+    pthread_mutex_unlock(&mutex);
 }
 
 // Find and remove a free block >= size from the free list
 static free_block_header *get_free_block(size_t size) {
+    pthread_mutex_lock(&mutex);
     if (free_list) {
         if (free_list->size >= size) {
             // If the first element of the free list is big enough
@@ -119,6 +120,7 @@ static free_block_header *get_free_block(size_t size) {
                 insert_free_block(new_free_block);
                 block->size = size;
             }
+            pthread_mutex_unlock(&mutex);
             return block;
         }
         free_block_header *current = free_list;
@@ -134,19 +136,25 @@ static free_block_header *get_free_block(size_t size) {
                     insert_free_block(new_free_block);
                     block->size = size;
                 }
+                pthread_mutex_unlock(&mutex);
                 return block;
             }
             current = current->next;
         }
     }
+    pthread_mutex_unlock(&mutex);
     return NULL;
 }
 
 void *hrealloc(void *ptr, size_t size) {
-	void *dest = hmalloc(size);
-	memcpy(dest, ptr, (size_t) ptr);
-	hfree(ptr);
-	return dest;
+    alloc_block_header *old_alloc = ((alloc_block_header *) ptr) - 1;
+    if (old_alloc->size < size) {
+        void *dest = hmalloc(size);
+	    memcpy(dest, ptr, old_alloc->size);    
+        hfree(ptr);
+        return dest;
+    }
+    return ptr;
 }
 
 void *hmalloc(size_t size) {
@@ -193,7 +201,6 @@ void *hmalloc(size_t size) {
 }
 
 void hfree(void *item) {
-
  	stats.chunks_freed += 1;
     alloc_block_header *alloc_header = ((alloc_block_header *) item) - 1;
     size_t size = alloc_header->size;
