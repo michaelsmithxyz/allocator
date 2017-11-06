@@ -9,6 +9,7 @@
 void*
 xmalloc(size_t bytes)
 {
+    printf("Malloc(%d bytes)\n", bytes);
     return malloc(bytes);
 }
 
