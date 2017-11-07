@@ -79,7 +79,6 @@ static void coalesce_free_list() {
 
 // Insert a free block onto the list and coalesce blocks
 static void insert_free_block(free_block_header *block) {
-    pthread_mutex_lock(&mutex);
     if (!free_list) {
         block->next = NULL;
         free_list = block;
@@ -102,12 +101,10 @@ static void insert_free_block(free_block_header *block) {
         } 
     }
     coalesce_free_list();
-    pthread_mutex_unlock(&mutex);
 }
 
 // Find and remove a free block >= size from the free list
 static free_block_header *get_free_block(size_t size) {
-    pthread_mutex_lock(&mutex);
     if (free_list) {
         if (free_list->size >= size) {
             // If the first element of the free list is big enough
@@ -142,7 +139,6 @@ static free_block_header *get_free_block(size_t size) {
             current = current->next;
         }
     }
-    pthread_mutex_unlock(&mutex);
     return NULL;
 }
 
@@ -158,7 +154,9 @@ void *hrealloc(void *ptr, size_t size) {
 }
 
 void *hmalloc(size_t size) {
-    stats.chunks_allocated += 1;
+	pthread_mutex_lock(&mutex);
+	
+	stats.chunks_allocated += 1;
     size += sizeof(alloc_block_header);
 
     if (size < PAGE_SIZE) {
@@ -167,6 +165,7 @@ void *hmalloc(size_t size) {
             alloc_block_header *header = (alloc_block_header *) free_block;
             size_t free_size = free_block->size;
             header->size = free_size;
+            pthread_mutex_unlock(&mutex);
             return (void *) (header + 1);
         } else {
             // Allocate a new page
@@ -182,6 +181,7 @@ void *hmalloc(size_t size) {
             }
             alloc_block_header *header = (alloc_block_header *) new_page;
             header->size = size;
+            pthread_mutex_unlock(&mutex);
             return (void *) (header + 1);
         }
     } else {
@@ -196,11 +196,13 @@ void *hmalloc(size_t size) {
 
         alloc_block_header *header = (alloc_block_header *) new_pages;
         header->size = num_pages * PAGE_SIZE;
+        pthread_mutex_unlock(&mutex);
         return (void *) (header + 1);
     }
 }
 
 void hfree(void *item) {
+	pthread_mutex_lock(&mutex);
  	stats.chunks_freed += 1;
     alloc_block_header *alloc_header = ((alloc_block_header *) item) - 1;
     size_t size = alloc_header->size;
@@ -212,4 +214,5 @@ void hfree(void *item) {
         munmap((void *) alloc_header, size);
         stats.pages_unmapped += size / PAGE_SIZE;
     }
+    pthread_mutex_unlock(&mutex);
 }
