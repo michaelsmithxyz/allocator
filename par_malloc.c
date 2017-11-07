@@ -2,6 +2,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <syscall.h>
 
 #include <sys/mman.h>
@@ -62,7 +63,8 @@ int _allocator_initialized = -1;
 pthread_once_t _init_once_control = PTHREAD_ONCE_INIT;
 
 // This is only used to lock the global free page stack which should ideally be minimally contested
-pthread_spinlock_t global_spinlock;
+//pthread_spinlock_t global_spinlock;
+pthread_mutex_t global_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // Global page stack (needs to be locked)
 page_stack_node *global_page_stack = NULL;
@@ -120,9 +122,11 @@ static void *_get_free_page_unsafe() {
 
 // Grab a page from the central free page stack
 static void *get_free_page(void) {
-    pthread_spin_lock(&global_spinlock);
+    //pthread_spin_lock(&global_spinlock);
+    pthread_mutex_lock(&global_mutex);
     void *page = _get_free_page_unsafe();
-    pthread_spin_unlock(&global_spinlock);
+    //pthread_spin_unlock(&global_spinlock);
+    pthread_mutex_unlock(&global_mutex);
     return page;
 }
 
@@ -130,7 +134,7 @@ static void *get_free_page(void) {
 // Initialize global allocator state
 static void xmalloc_init(void) {
     (void) _alloc_system_pages_unsafe();
-    pthread_spin_init(&global_spinlock, PTHREAD_PROCESS_PRIVATE);
+    //pthread_spin_init(&global_spinlock, PTHREAD_PROCESS_PRIVATE);
     _allocator_initialized = 1;
 }
 
@@ -203,6 +207,32 @@ static inline void _xmalloc_check_init(void) {
     }
 }
 
+static block_header *xmalloc_thread_alloc(size_t size) {
+    size_t class = best_size_class(size);
+    size_t real_size = SIZE_CLASS_TO_SIZE(class);
+    bin_stack_node *bin = thread_cache->bins[class];
+    if (!bin) {
+        replenish_thread_cache();
+        bin = thread_cache->bins[class];
+    }
+    if (!bin) {
+        // This shouldn't happen
+        return NULL;
+    }
+    thread_cache->bins[class] = bin->next;
+    ((block_header *) bin)->h.size = real_size;
+    return (block_header *) bin + 1;
+}
+
+
+static void xfree_thread_free(block_header *alloc) {
+    size_t size = alloc->h.size;
+    size_t class = best_size_class(size);
+    bin_stack_node *bin = (bin_stack_node *) alloc;
+    bin->next = thread_cache->bins[class];
+    thread_cache->bins[class] = bin;
+}
+
 
 void *xmalloc(size_t size) { 
     _xmalloc_check_init();
@@ -218,17 +248,28 @@ void *xmalloc(size_t size) {
         header->h.size = size;
         return (void *) (header + 1);
     } else {
-
+        return xmalloc_thread_alloc(size);
     }
-    return NULL;
 }
 
 
 void xfree(void *ptr) {
-
+    block_header *header = ((block_header *) ptr) - 1;
+    size_t size = header->h.size;
+    if (size > THREAD_CACHE_ALLOC_MAX) {
+        // This allocation was mmap'd directly and we can just unmap it
+        munmap(ptr, size);
+    } else {
+        xfree_thread_free(header);
+    }
 }
 
 
 void *xrealloc(void *prev, size_t bytes) {
-    return 0;
+    block_header *prev_header = (block_header *) prev - 1;
+    size_t prev_size = prev_header->h.size - BLOCK_HEADER_SIZE;
+    void *new = xmalloc(bytes);
+    memcpy(new, prev, prev_size);
+    xfree(prev);
+    return new;
 }
