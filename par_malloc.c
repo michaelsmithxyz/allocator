@@ -3,7 +3,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <syscall.h>
 
 #include <sys/mman.h>
 #include <sys/types.h>
@@ -31,7 +30,8 @@
 #define SIZE_CLASS_TO_SIZE(n) (1 << (5 + n))
 
 #define SIZE_CLASS_NUM 7
-#define THREAD_CACHE_ALLOC_MAX SIZE_CLASS_5
+#define THREAD_CACHE_ALLOC_MAX SIZE_CLASS_6
+#define BIN_REFRESH_PAGE_COUNT 4
 
 
 typedef struct page_stack_node page_stack_node;
@@ -71,7 +71,6 @@ page_stack_node *global_page_stack = NULL;
 
 // Thread local thread cache (free list bins)
 __thread thread_cache_bins *thread_cache = NULL;
-__thread pid_t current_thread_id = 0;
 __thread int current_thread_initialized = 0;
 
 
@@ -206,6 +205,27 @@ static void replenish_thread_cache(void) {
 }
 
 
+static void replenish_bin(size_t class) {
+    page_stack_node *pages = get_free_pages(BIN_REFRESH_PAGE_COUNT);
+    page_stack_node *page = pages;
+    size_t page_request_count = BIN_REFRESH_PAGE_COUNT;
+    size_t bin_cell_size = SIZE_CLASS_TO_SIZE(class);
+    size_t bin_cell_count = PAGE_SIZE_BYTES / bin_cell_size;
+    for (size_t i = 0; i < page_request_count; i++) {
+        page_stack_node *next = page->next;
+        char *current_cell = (char *) page;
+        for (size_t cell_num = 0; cell_num < bin_cell_count - 1; cell_num++) {
+            bin_stack_node *node = (bin_stack_node *) current_cell;
+            node->next = (bin_stack_node *) (current_cell + bin_cell_size);
+            current_cell = current_cell + bin_cell_size;
+        }
+        ((bin_stack_node *) current_cell)->next = thread_cache->bins[class];
+        thread_cache->bins[class] = (bin_stack_node *) page;
+        page = next;
+    }
+}
+
+
 static inline void _init_thread_cache(void) {
     thread_cache_bins *cache = get_free_page();
     for (size_t i = 0; i < SIZE_CLASS_NUM; i++) {
@@ -217,7 +237,6 @@ static inline void _init_thread_cache(void) {
 
 // Initialize thread-local state
 static void xmalloc_thread_init(void) {
-    current_thread_id = syscall(SYS_gettid);
     _init_thread_cache();
     replenish_thread_cache();
     current_thread_initialized = 1;
@@ -240,8 +259,8 @@ static block_header *xmalloc_thread_alloc(size_t size) {
     size_t real_size = SIZE_CLASS_TO_SIZE(class);
     bin_stack_node *bin = thread_cache->bins[class];
     if (!bin) {
-        //printf("Out of size class %ld\n", real_size);
-        replenish_thread_cache();
+        //printf("Refreshing bins of size: %ld\n", real_size);
+        replenish_bin(class);
         bin = thread_cache->bins[class];
     }
     if (!bin) {
