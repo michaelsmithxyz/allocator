@@ -1,0 +1,20 @@
+Processor:  i7-7560U CPU
+4 Cores
+16 GB RAM
+
+Strategy    Time
+----------------
+ivec_sys    0.47
+list_sys    1.07
+ivec_hw7    did not terminate
+list_hw7    did not terminate
+ivec_par    0.39
+list_par    0.55
+
+Strategy
+--------
+
+
+Results
+-------
+
