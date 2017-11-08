@@ -15,7 +15,7 @@
 
 
 #define PAGE_SIZE_BYTES 4096
-#define INIT_PAGE_ALLOC 1024
+#define INIT_PAGE_ALLOC 2028
 
 #define ROUND_UP_TO_PAGE(x) ( (x + (PAGE_SIZE_BYTES - 1)) & (~(PAGE_SIZE_BYTES - 1)))
 
@@ -90,8 +90,9 @@ static size_t _free_page_stack_size_unsafe(void) {
 // Allocate a new batch of pages for the free page stack
 // This is really expensive which is why we generally choose to allocate so many at once
 static int _alloc_system_pages_unsafe(void) {
+   // printf("Refreshing system pages\n");
     char *init_pages = mmap(NULL, PAGE_SIZE_BYTES * INIT_PAGE_ALLOC, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (!init_pages) {
+    if (init_pages == MAP_FAILED) {
         // We're fucked
         return -1;
     }
@@ -119,6 +120,25 @@ static void *_get_free_page_unsafe() {
     return page;
 }
 
+static page_stack_node *_get_free_pages_unsafe(size_t n) {
+    if (!global_page_stack) {
+        _alloc_system_pages_unsafe();
+    }
+    size_t grabbed = 0;
+    page_stack_node *first = global_page_stack;
+    page_stack_node *current = global_page_stack;
+    while (grabbed < n) {
+        if (!current->next) {
+            _alloc_system_pages_unsafe();
+            current->next = global_page_stack;
+        }
+        current = current->next;
+        grabbed++;
+    }
+    global_page_stack = current;
+    return first;
+}
+
 
 // Grab a page from the central free page stack
 static void *get_free_page(void) {
@@ -128,6 +148,14 @@ static void *get_free_page(void) {
     //pthread_spin_unlock(&global_spinlock);
     pthread_mutex_unlock(&global_mutex);
     return page;
+}
+
+
+static page_stack_node *get_free_pages(size_t n) {
+    pthread_mutex_lock(&global_mutex);
+    page_stack_node *pages = _get_free_pages_unsafe(n);
+    pthread_mutex_unlock(&global_mutex);
+    return pages;
 }
 
 
@@ -159,21 +187,21 @@ static inline size_t best_size_class(size_t size) {
 
 
 static void replenish_thread_cache(void) {
+    page_stack_node *pages = get_free_pages(SIZE_CLASS_NUM);
     for (size_t i = 0; i < SIZE_CLASS_NUM; i++) {
-        if (!thread_cache->bins[i]) {
-            void *page = get_free_page();
-            size_t bin_size = SIZE_CLASS_TO_SIZE(i);
-            size_t cells = PAGE_SIZE_BYTES / bin_size;
-            
-            char *current_cell = (char *) page;
-            for (size_t cell_num = 0; cell_num < cells - 1; cell_num++) {
-                bin_stack_node *node = (bin_stack_node *) current_cell;
-                node->next = (bin_stack_node *) (current_cell + bin_size);
-                current_cell = current_cell + bin_size;
-            }
-            ((bin_stack_node *) current_cell)->next = NULL;
-            thread_cache->bins[i] = (bin_stack_node *) page;
+        void *page = (void *) pages;
+        pages = pages->next;
+        size_t bin_size = SIZE_CLASS_TO_SIZE(i);
+        size_t cells = PAGE_SIZE_BYTES / bin_size;
+        
+        char *current_cell = (char *) page;
+        for (size_t cell_num = 0; cell_num < cells - 1; cell_num++) {
+            bin_stack_node *node = (bin_stack_node *) current_cell;
+            node->next = (bin_stack_node *) (current_cell + bin_size);
+            current_cell = current_cell + bin_size;
         }
+        ((bin_stack_node *) current_cell)->next = thread_cache->bins[i];
+        thread_cache->bins[i] = (bin_stack_node *) page;
     }
 }
 
@@ -212,6 +240,7 @@ static block_header *xmalloc_thread_alloc(size_t size) {
     size_t real_size = SIZE_CLASS_TO_SIZE(class);
     bin_stack_node *bin = thread_cache->bins[class];
     if (!bin) {
+        //printf("Out of size class %ld\n", real_size);
         replenish_thread_cache();
         bin = thread_cache->bins[class];
     }
