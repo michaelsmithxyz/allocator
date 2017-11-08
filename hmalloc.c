@@ -117,7 +117,6 @@ static free_block_header *get_free_block(size_t size) {
                 insert_free_block(new_free_block);
                 block->size = size;
             }
-            pthread_mutex_unlock(&mutex);
             return block;
         }
         free_block_header *current = free_list;
@@ -133,7 +132,6 @@ static free_block_header *get_free_block(size_t size) {
                     insert_free_block(new_free_block);
                     block->size = size;
                 }
-                pthread_mutex_unlock(&mutex);
                 return block;
             }
             current = current->next;
@@ -154,9 +152,8 @@ void *hrealloc(void *ptr, size_t size) {
 }
 
 void *hmalloc(size_t size) {
-	pthread_mutex_lock(&mutex);
-	
-	stats.chunks_allocated += 1;
+    pthread_mutex_lock(&mutex);
+    stats.chunks_allocated += 1;
     size += sizeof(alloc_block_header);
 
     if (size < PAGE_SIZE) {
