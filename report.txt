@@ -17,4 +17,7 @@ Strategy
 
 Results
 -------
-
+We ran all three allocators on 100000 inputs for ivec and list.
+Our parallel malloc was faster than the system's by 0.08s for ivec and 0.52s 
+for list. hw07's malloc was significantly slower than the other two allocators
+so we killed it after a minute of running.
