@@ -1,18 +1,12 @@
-Processor:  i7-7560U CPU
-4 Cores
-16 GB RAM
+# allocator
 
-Strategy    Time
-----------------
-ivec_sys    0.47
-list_sys    1.07
-ivec_hw7    did not terminate
-list_hw7    did not terminate
-ivec_par    0.39
-list_par    0.55
+A memory allocator in C written as course work with Elleen Pan (elleenpan.com)
+for Northeastern's CS 3560 - Computer Systems in Fall 2017.
 
-Strategy
---------
+## Reflections
+
+These are reflections on the design and performance of the allocator implementation:
+
 The general idea of our allocator is a simplified tcmalloc with a few trade-offs
 made for the use case at hand. At a high level, there is a central page stack
 which mmap's a lot of pages from the system at once and then hands them out to
@@ -33,11 +27,3 @@ This would probably have somewhat strange performance implications under certain
 
 Finally, our allocator has a naive handling of large allocations, which it just delegates to mmap. This
 works for the intended use-cases but might have negative implications for certain usage profiles.
-
-
-Results
--------
-We ran all three allocators on 100000 inputs for ivec and list.
-Our parallel malloc was faster than the system's by 0.08s for ivec and 0.52s 
-for list. hw07's malloc was significantly slower than the other two allocators
-so we killed it after a minute of running.

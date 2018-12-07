@@ -1,7 +1,4 @@
-
-BINS := collatz-list-sys collatz-ivec-sys \
-        collatz-list-hw7 collatz-ivec-hw7 \
-        collatz-list-par collatz-ivec-par
+BINS := list-test ivec-test
 
 HDRS := $(wildcard *.h)
 SRCS := $(wildcard *.c)
@@ -12,30 +9,15 @@ LDLIBS := -lpthread
 
 all: $(BINS)
 
-collatz-list-sys: list_main.o sys_malloc.o
+list-test: list_main.o xmalloc.o
 	gcc $(CFLAGS) -o $@ $^ $(LDLIBS)
 
-collatz-ivec-sys: ivec_main.o sys_malloc.o
-	gcc $(CFLAGS) -o $@ $^ $(LDLIBS)
-
-collatz-list-hw7: list_main.o hw07_malloc.o hmalloc.o
-	gcc $(CFLAGS) -o $@ $^ $(LDLIBS)
-
-collatz-ivec-hw7: ivec_main.o hw07_malloc.o hmalloc.o
-	gcc $(CFLAGS) -o $@ $^ $(LDLIBS)
-
-collatz-list-par: list_main.o par_malloc.o
-	gcc $(CFLAGS) -o $@ $^ $(LDLIBS)
-
-collatz-ivec-par: ivec_main.o par_malloc.o
+ivec-test: ivec_main.o xmalloc.o
 	gcc $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 %.o : %.c $(HDRS) Makefile
 
 clean:
-	rm -f *.o $(BINS) time.tmp outp.tmp
-
-test:
-	perl test.pl
+	rm -f *.o $(BINS)
 
 .PHONY: clean test
